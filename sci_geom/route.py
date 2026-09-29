@@ -26,9 +26,22 @@ import numpy as np
 
 OFF_ROUTE = "off_route"
 AMBIGUOUS_BRANCH = "ambiguous_branch"
+# Distinct from OFF_ROUTE on purpose: the polyline DOES come near this point, but
+# its nearest part is an endpoint, and clamping there would fabricate progress.
+# "off-route" needs a diagnostic cause, not just a count.
+BEYOND_ROUTE_END = "beyond_route_end"
 
 DEFAULT_RADIUS_M = 15.0    # §16.3, ratified: beyond this, a fix is off-route
 DEFAULT_COMPETE_M = 5.0    # §16.3, ratified: chainages differing by more than this compete
+
+# A foot that lands past an endpoint by a floating-point crumb is ON the segment.
+# Found on real data: the last fix of a traversal IS the route's last vertex, yet
+# its parameter came out 1.0000000000000002 and the no-clamping rule called the
+# route's own endpoint `off_route`. Hand-made test coordinates land exactly on 1.0,
+# which is why no fixture caught it. This tolerance is numerical only -- the
+# no-clamping rule is about points genuinely beyond the route, metres away.
+_U_EPS = 1e-9
+_D_EPS = 1e-9   # metres: a margin for the nearest-endpoint comparison below
 
 
 def _vertices(vertices) -> np.ndarray:
@@ -81,15 +94,23 @@ def project(vertices, point, *, radius_m=DEFAULT_RADIUS_M, compete_m=DEFAULT_COM
     # Unclamped parameter along each segment. Outside [0, 1] the foot is beyond a
     # vertex, so that segment does not carry this point -- see the no-clamping rule.
     u = np.einsum("ij,ij->i", p - starts, deltas) / (lengths ** 2)
-    feet = starts + u[:, None] * deltas
+    u_clipped = np.clip(u, 0.0, 1.0)   # the station stays inside the route, always
+    feet = starts + u_clipped[:, None] * deltas
     distances = np.linalg.norm(p - feet, axis=1)
 
-    inside = (u >= 0.0) & (u <= 1.0)
+    inside = (u >= -_U_EPS) & (u <= 1.0 + _U_EPS)
     near = distances <= radius_m
     candidates = np.flatnonzero(inside & near)
     if not len(candidates):
+        # No segment carries this point in its interior. Two very different
+        # situations hide behind that, and the reviewer asked for them to be told apart:
+        # the polyline may still come within the radius -- at a vertex or an end,
+        # which the no-clamping rule refuses to use -- or it may simply be far
+        # away. A bare "off-route" count cannot be audited.
+        clamped = np.linalg.norm(p - (starts + np.clip(u, 0.0, 1.0)[:, None] * deltas), axis=1)
+        reason = BEYOND_ROUTE_END if float(clamped.min()) <= radius_m else OFF_ROUTE
         return {"station_m": None, "segment": None, "offset_m": None,
-                "reason": OFF_ROUTE, "candidates": 0}
+                "reason": reason, "candidates": 0}
 
     # Group the candidates into runs of CONSECUTIVE segments. One run is one
     # continuous stretch of route -- the two segments of a bend belong together,
@@ -109,7 +130,7 @@ def project(vertices, point, *, radius_m=DEFAULT_RADIUS_M, compete_m=DEFAULT_COM
     # comparison below is therefore a guard against a genuine branch or loop, not a
     # knob to tune -- and no variation of it is observable at those thresholds.
     def _interval(run: list[int]) -> tuple[float, float]:
-        stations = [float(cumulative[i] + u[i] * lengths[i]) for i in run]
+        stations = [float(cumulative[i] + u_clipped[i] * lengths[i]) for i in run]
         return min(stations), max(stations)
 
     intervals = [_interval(run) for run in runs]
@@ -119,8 +140,22 @@ def project(vertices, point, *, radius_m=DEFAULT_RADIUS_M, compete_m=DEFAULT_COM
                 "reason": AMBIGUOUS_BRANCH, "candidates": int(len(candidates))}
 
     best = int(candidates[int(np.argmin(distances[candidates]))])
+
+    # If the genuinely nearest point of the polyline is an ENDPOINT -- which the
+    # no-clamping rule forbids using -- then falling back to a farther segment
+    # would fabricate progress. Found by a test: on (0,0)-(10,0)-(10,7), a point
+    # 1 m before the start is 1 m from the first vertex, yet the only usable foot
+    # was the corner 11 m away, which handed it station 10 m. Refuse instead.
+    # Compare with a margin, not at the bit: for the route's own last vertex the
+    # endpoint distance is exactly 0 while its computed foot lands ~1e-15 away, and
+    # a bare `<` made the route reject its own endpoint.
+    endpoint_distance = float(min(np.linalg.norm(p - v[0]), np.linalg.norm(p - v[-1])))
+    if endpoint_distance + _D_EPS < float(distances[best]):
+        return {"station_m": None, "segment": None, "offset_m": None,
+                "reason": BEYOND_ROUTE_END, "candidates": int(len(candidates))}
+
     return {
-        "station_m": float(cumulative[best] + u[best] * lengths[best]),
+        "station_m": float(cumulative[best] + u_clipped[best] * lengths[best]),
         "segment": best,
         "offset_m": float(distances[best]),
         "reason": None,
