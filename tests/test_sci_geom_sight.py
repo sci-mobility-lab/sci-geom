@@ -1,8 +1,6 @@
 import numpy as np
-import pandas as pd
 
-from encounters.schema import empty, validate
-from sci_geom.sight import build_occupancy, availability_table, available_sight_distance
+from sci_geom.sight import build_occupancy, available_sight_distance
 from sci_geom.voxel_los import voxelize
 
 
@@ -15,17 +13,6 @@ def _wall(x, y_range=(-1.0, 1.0), z_range=(0.0, 2.0), spacing=0.05):
 
 def _positions(stations, height):
     return np.column_stack((stations, np.zeros_like(stations), np.full_like(stations, height)))
-
-
-def _objects(rows):
-    template = empty("objects")
-    values = [
-        [object_id, "object", x, y, z, 1.0, 1.0, station, 0.0, 0.1, 1.0,
-         pd.NA, pd.NA, "test"]
-        for object_id, station, x, y, z in rows
-    ]
-    frame = pd.DataFrame(values, columns=template.columns)
-    return frame.astype({column: template[column].dtype for column in template})
 
 
 def test_clear_corridor_returns_exact_span_and_cap():
@@ -95,67 +82,6 @@ def test_continuity_stops_at_first_break_instead_of_using_maximum():
     )
     assert result == 10.0
     assert result != 60.0
-
-
-def test_availability_table_schema_range_raycast_count_and_order(monkeypatch):
-    corridor = pd.DataFrame(
-        {
-            "station_m": np.array([0.0, 10.0, 20.0]),
-            "x": np.array([0.0, 10.0, 20.0]),
-            "y": np.zeros(3),
-            "z": np.zeros(3),
-        }
-    )
-    objects = _objects([
-        ("b", 20.0, 20.0, 2.0, 1.0),
-        ("a", 0.0, 0.0, 2.0, 1.0),
-    ])
-    calls = []
-
-    def clear_ray(*args, **kwargs):
-        calls.append(args[0].copy())
-        return False, None, 0.0
-
-    monkeypatch.setattr("sci_geom.sight.blocked", clear_ray)
-    progress = []
-    kwargs = dict(
-        eye_heights_m=[1.40, 1.08], max_range_m=10.0,
-        progress=lambda completed, total: progress.append((completed, total)),
-    )
-    first = availability_table(corridor, objects, set(), **kwargs)
-    second = availability_table(corridor, objects, set(), **kwargs)
-
-    validate(first, "availability")
-    assert set(first["eye_height_m"]) == {1.08, 1.40}
-    assert (first["reason"] == "out_of_range").sum() == 4
-    assert len(calls) == 16  # 8 in-range rays per run; out-of-range rows were not cast
-    assert progress == [(1, 2), (2, 2), (1, 2), (2, 2)]
-    assert first.equals(second)
-    assert list(first[["object_id", "eye_height_m", "station_m"]].itertuples(index=False, name=None)) == sorted(
-        first[["object_id", "eye_height_m", "station_m"]].itertuples(index=False, name=None)
-    )
-
-
-def test_empty_objects_single_station_and_object_at_first_station():
-    corridor = pd.DataFrame(
-        {"station_m": [0.0], "x": [0.0], "y": [0.0], "z": [0.0]}
-    )
-    result = availability_table(
-        corridor, empty("objects"), set(), eye_heights_m=[1.08, 1.40]
-    )
-    validate(result, "availability")
-    assert result.empty
-
-    objects = _objects([("first", 0.0, 0.0, 0.0, 1.4)])
-    result = availability_table(corridor, objects, set(), eye_heights_m=[1.4])
-    assert result.to_dict("records") == [
-        {"object_id": "first", "station_m": 0.0, "eye_height_m": 1.4,
-         "available": True, "reason": "ok"}
-    ]
-    assert available_sight_distance(
-        np.array([0.0]), np.array([[0.0, 0.0, 1.4]]),
-        np.array([0.0, 0.0, 1.4]), set(), eye_height_m=1.4,
-    ) == 0.0
 
 
 def test_build_occupancy_uses_a_LOCAL_ground_reference_not_a_global_one():

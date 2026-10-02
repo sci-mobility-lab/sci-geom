@@ -1,0 +1,28 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "sci-geom"
+version = "0.1.0"
+description = "Geometry kernels shared by the SCI projects: geodesy, frames, PLY/TUM I/O, line of sight, sight distance"
+requires-python = ">=3.12"
+# scipy is a hard requirement: sight.py and degeneracy.py import scipy.spatial lazily, so a missing
+# scipy only shows up when those functions are called.
+dependencies = ["numpy>=2.0", "scipy>=1.11"]
+
+[project.optional-dependencies]
+geodesy = ["pyproj>=3.6"]
+
+[dependency-groups]
+dev = ["pytest>=8.0"]
+
+[tool.setuptools.packages.find]
+include = ["sci_geom*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+# A machine with ROS2 sourced puts /opt/ros/*/site-packages on PYTHONPATH, and pytest then autoloads
+# ROS2's launch/ament plugins (which crash without their deps). Harmless where ROS2 is absent.
+addopts = """-p no:launch -p no:launch_ros -p no:launch_testing
+  -p no:ament_lint -p no:ament_flake8 -p no:ament_pep257 -p no:ament_copyright -p no:ament_xmllint"""

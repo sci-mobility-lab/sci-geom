@@ -30,9 +30,7 @@ should not be read as promising that real runs reproduce prototype figures.
 from __future__ import annotations
 
 import numpy as np
-import pandas as pd
 
-from encounters.schema import SCHEMAS, empty
 from sci_geom.terrain_los import terrain_blocks_los
 from sci_geom.voxel_los import blocked, voxelize
 
@@ -107,86 +105,6 @@ def available_sight_distance(
         if available == max_range_m:
             break
     return available
-
-
-def availability_table(
-    corridor,
-    objects,
-    occupied,
-    *,
-    eye_heights_m,
-    voxel=0.15,
-    step=0.08,
-    clearance=1,
-    min_hit_samples=2,
-    start_margin=2.0,
-    end_margin=1.0,
-    max_range_m=250.0,
-    ground_z_at=None,
-    object_height_m=0.6,
-    progress=None,
-) -> pd.DataFrame:
-    """Evaluate each object from every corridor station and eye height.
-
-    ``progress``, when supplied, is called as ``progress(completed, total)`` once
-    per object.
-    """
-    if objects.empty:
-        return empty("availability")
-
-    station_values = corridor["station_m"].to_numpy(dtype=np.float64)
-    ground_positions = corridor[["x", "y", "z"]].to_numpy(dtype=np.float64)
-    heights = np.asarray(eye_heights_m, dtype=np.float64)
-    rows = []
-    ordered_objects = objects.sort_values("object_id", kind="mergesort")
-    total = len(ordered_objects)
-
-    for completed, obj in enumerate(ordered_objects.itertuples(index=False), start=1):
-        target = np.array([obj.x, obj.y, obj.z], dtype=np.float64)
-        in_range = np.abs(station_values - float(obj.station_m)) <= max_range_m
-        for height in heights:
-            observers = ground_positions.copy()
-            observers[:, 2] += height
-            for index, station in enumerate(station_values):
-                if not in_range[index]:
-                    available, reason = False, "out_of_range"
-                elif ground_z_at is not None and terrain_blocks_los(
-                    observers[index],
-                    target,
-                    ground_z_at,
-                    sample_step_m=1.0,
-                    clearance_m=0.05,
-                    object_height=object_height_m,
-                    start_margin_m=start_margin,
-                    end_margin_m=end_margin,
-                ):
-                    # The ground itself breaks the line. Voxel occupancy cannot see this: it is
-                    # built from points ABOVE the ground, so a crest never blocks.
-                    available, reason = False, "occluded"
-                else:
-                    is_blocked, _hit, _distance = blocked(
-                        observers[index],
-                        target,
-                        occupied,
-                        voxel,
-                        step,
-                        clearance,
-                        min_hit_samples,
-                        start_margin,
-                        end_margin,
-                    )
-                    available = not is_blocked
-                    reason = "occluded" if is_blocked else "ok"
-                rows.append((str(obj.object_id), station, height, available, reason))
-        if progress is not None:
-            progress(completed, total)
-
-    frame = pd.DataFrame(rows, columns=SCHEMAS["availability"])
-    for column, (dtype, _unit, _required, _description) in SCHEMAS["availability"].items():
-        frame[column] = frame[column].astype(dtype)
-    return frame.sort_values(
-        ["object_id", "eye_height_m", "station_m"], kind="mergesort", ignore_index=True
-    )
 
 
 def build_occupancy(points, corridor_xyz, *, voxel=0.20,
