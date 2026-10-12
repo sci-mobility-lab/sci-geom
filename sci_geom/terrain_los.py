@@ -23,6 +23,10 @@ clearance that ramps from `clearance_m` at the eye to the object height at the t
 the chord. Two consecutive samples, not one, so a single noisy ground cell cannot close a sightline.
 
 This is a FAITHFUL extraction, guarded by an equivalence test. Do not "improve" it without one.
+
+v0.2.0 departs from the original in exactly one place, for object heights below `clearance_m`
+(see the comment on the clearance ramp). For every object height >= `clearance_m` -- including the
+0.6 m and 1.08 m targets the equivalence test in SCI_LiDAR draws -- the result is unchanged.
 """
 from __future__ import annotations
 
@@ -42,7 +46,12 @@ def terrain_blocks_los(
     start_margin_m: float = 2.0,
     end_margin_m: float = 1.0,
 ) -> bool:
-    """`ground_z_at` is a callable: (N,2) xy array -> (N,) ground elevations."""
+    """`ground_z_at` is a callable: (N,2) xy array -> (N,) ground elevations.
+
+    `object_height` must be finite and >= 0 (ValueError otherwise).
+    """
+    if not math.isfinite(float(object_height)) or float(object_height) < 0.0:
+        raise ValueError(f"object_height must be finite and >= 0, got {object_height!r}")
     observer = np.asarray(observer, dtype=np.float64)
     target = np.asarray(target, dtype=np.float64)
     delta_xy = np.asarray(target[:2] - observer[:2], dtype=np.float64)
@@ -61,6 +70,11 @@ def terrain_blocks_los(
     ground_z = np.asarray(ground_z_at(xy), dtype=np.float64)
     # Preserve the 0.6 m object SSD clearance while letting taller targets clear crests sooner.
     clearance_object_height = min(float(object_height), 0.6)
-    clearance = float(clearance_m) + u * max(0.0, clearance_object_height - float(clearance_m))
+    # v0.2.0: the ramp may also DESCEND to an object height below `clearance_m`. Up to v0.1.0 it
+    # was `max(0, h - clearance_m)`, so a road-level object (h = 0, the bicycle stopping-sight
+    # case) kept a 5 cm clearance right up to the target, and a perfectly flat road reported
+    # "blocked by terrain" beyond ~2*eye/clearance metres (56 m at a 1.40 m eye, 43 m at 1.08 m).
+    # Identical to v0.1.0 for every object_height >= clearance_m (known-answer case K9).
+    clearance = float(clearance_m) + u * (clearance_object_height - float(clearance_m))
     over = ground_z + clearance >= line_z
     return bool(np.any(over[:-1] & over[1:])) if len(over) >= 2 else False

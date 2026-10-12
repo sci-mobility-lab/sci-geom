@@ -7,4 +7,4 @@ UI-independent, dependency-light (numpy only). Consumed by `platform/` and
 what lets an analysis result be reproduced without running SCI-LiDAR Studio.
 """
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"

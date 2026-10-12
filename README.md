@@ -30,3 +30,10 @@ uv run pytest
 
 A change here reaches a project only when that project bumps its pinned tag. That is deliberate:
 a fix made for LiDAR cannot silently change Eye Tracking results. Tag every release (`v0.1.1`, …).
+
+## Releases
+
+| Tag | What changed | Effect on callers |
+|---|---|---|
+| v0.2.0 | `geodetic_to_enu` vectorised (arrays → `(3, …)`; scalars unchanged). `terrain_blocks_los`: the clearance ramp now descends to object heights below `clearance_m` (known-answer case K9: a flat road no longer blocks a road-level object beyond 2·eye/0.05 m); negative or non-finite heights raise. New `available_sight_distance_from` (observer fixed, targets moved outward, as in the corridor engines; eye and object heights applied; optional bisection; per-target verdicts). `available_sight_distance` warns that its `eye_height_m` is ignored. | Identical results for every object height ≥ 0.05 m. Array inputs to `geodetic_to_enu` used to fail or silently return garbage. |
+| v0.1.0 | Initial split from SCI_LiDAR. | — |

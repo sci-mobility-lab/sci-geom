@@ -29,9 +29,24 @@ def _enu_rot(lat0, lon0):
 
 
 def geodetic_to_enu(lat, lon, h, lat0, lon0, h0):
-    """Convert ``(lat, lon, h)`` to ENU centered at ``(lat0, lon0, h0)``."""
-    d = ecef(lat, lon, h) - ecef(lat0, lon0, h0)
-    return _enu_rot(lat0, lon0) @ d
+    """Convert ``(lat, lon, h)`` to ENU centered at ``(lat0, lon0, h0)``.
+
+    Scalar inputs return shape ``(3,)``, exactly as in v0.1.0, so ``geodetic_to_enu(...)[:2]`` is
+    still ``(east, north)``. Array inputs (broadcast together) return shape ``(3, *shape)``: row 0
+    is east, row 1 north, row 2 up.
+
+    ⚠️ Before v0.2.0 an array input was NOT supported and did not always fail: with N=2 it raised a
+    broadcast error, but with N=3 the ``(3, N) - (3,)`` subtraction broadcast silently and returned
+    garbage. Callers that worked around this by looping over points can now pass the arrays.
+    """
+    lat_a, lon_a, h_a = np.broadcast_arrays(
+        np.asarray(lat, dtype=np.float64),
+        np.asarray(lon, dtype=np.float64),
+        np.asarray(h, dtype=np.float64),
+    )
+    origin = ecef(lat0, lon0, h0).reshape((3,) + (1,) * lat_a.ndim)
+    d = ecef(lat_a, lon_a, h_a) - origin
+    return np.tensordot(_enu_rot(lat0, lon0), d, axes=1)
 
 
 def enu_to_geodetic(e, n, u, lat0, lon0, h0):
