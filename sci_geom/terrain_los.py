@@ -74,7 +74,12 @@ def terrain_blocks_los(
     # was `max(0, h - clearance_m)`, so a road-level object (h = 0, the bicycle stopping-sight
     # case) kept a 5 cm clearance right up to the target, and a perfectly flat road reported
     # "blocked by terrain" beyond ~2*eye/clearance metres (56 m at a 1.40 m eye, 43 m at 1.08 m).
-    # Identical to v0.1.0 for every object_height >= clearance_m (known-answer case K9).
-    clearance = float(clearance_m) + u * (clearance_object_height - float(clearance_m))
+    # Identical to v0.1.0 for every object_height >= clearance_m, whatever clearance_m is
+    # (known-answer case K9).
+    if float(object_height) < float(clearance_m):
+        ramp = float(object_height) - float(clearance_m)  # descends to the object at the target
+    else:
+        ramp = max(0.0, clearance_object_height - float(clearance_m))  # v0.1.0, unchanged
+    clearance = float(clearance_m) + u * ramp
     over = ground_z + clearance >= line_z
     return bool(np.any(over[:-1] & over[1:])) if len(over) >= 2 else False

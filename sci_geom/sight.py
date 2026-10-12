@@ -30,13 +30,40 @@ should not be read as promising that real runs reproduce prototype figures.
 from __future__ import annotations
 
 import math
-import warnings
 from dataclasses import dataclass
 
 import numpy as np
 
 from sci_geom.terrain_los import terrain_blocks_los
 from sci_geom.voxel_los import blocked, voxelize
+
+
+def _occlusion(eye, target, occupied, *, voxel, step, clearance, min_hit_samples, start_margin,
+               end_margin, ground_z_at, object_height_m, terrain_sample_step_m, terrain_clearance_m):
+    """The two occlusion layers in the HSO order. Returns (reason, hit): reason None when visible.
+
+    Terrain first (`terrain_blocks_los`, only when `ground_z_at` is given), then the voxel march
+    (`blocked`, only when there is occupancy). Both kernels below call this one function so the
+    layer order, margins and clearances cannot drift apart between them.
+    """
+    if ground_z_at is not None and terrain_blocks_los(
+        eye,
+        target,
+        ground_z_at,
+        sample_step_m=terrain_sample_step_m,
+        clearance_m=terrain_clearance_m,
+        object_height=object_height_m,
+        start_margin_m=start_margin,
+        end_margin_m=end_margin,
+    ):
+        return "terrain", None
+    if occupied:
+        is_blocked, hit, _ = blocked(
+            eye, target, occupied, voxel, step, clearance, min_hit_samples, start_margin, end_margin
+        )
+        if is_blocked:
+            return "obstacle", (None if hit is None else tuple(float(v) for v in hit))
+    return None, None
 
 
 def available_sight_distance(
@@ -68,17 +95,18 @@ def available_sight_distance(
 
     `ground_z_at` is a callable (N,2) xy -> (N,) ground elevation. None disables the terrain layer.
 
-    ⚠️ **`positions` are EYE-LEVEL observer points; `eye_height_m` is not used.** Up to v0.1.0 the
-    parameter was required and silently ignored, so passing 1.08 or 1.40 changed nothing unless the
-    caller had already added the height to `positions`. It now only triggers a DeprecationWarning.
-    Use `available_sight_distance_from`, which takes ground points and applies the eye height.
+    ⚠️ **`positions` are EYE-LEVEL observer points.** Up to v0.1.0 this function also required an
+    `eye_height_m` argument and silently ignored it, so passing 1.08 or 1.40 changed nothing unless
+    the caller had already added the height to `positions`. Since v0.2.0 passing it raises
+    TypeError: a warning would be hidden by Python's default filters, and applying the height now
+    would double-count it for every caller that already adds it. Use `available_sight_distance_from`
+    for ground-level observers; it applies the eye height.
     """
     if eye_height_m is not None:
-        warnings.warn(
-            "available_sight_distance(): eye_height_m is ignored -- positions must already be at "
-            "eye level. Use available_sight_distance_from(), which applies the eye height.",
-            DeprecationWarning,
-            stacklevel=2,
+        raise TypeError(
+            "available_sight_distance(): eye_height_m is not used -- positions must already be at "
+            "eye level. Drop the argument, or use available_sight_distance_from(), which takes "
+            "ground points and applies the eye height."
         )
     stations = np.asarray(stations, dtype=np.float64)
     positions = np.asarray(positions, dtype=np.float64)
@@ -93,29 +121,13 @@ def available_sight_distance(
         distance_back = float(target_station - station)
         if distance_back > max_range_m:
             return float(max_range_m)
-        if ground_z_at is not None and terrain_blocks_los(
-            observer,
-            target_xyz,
-            ground_z_at,
-            sample_step_m=1.0,
-            clearance_m=0.05,
-            object_height=object_height_m,
-            start_margin_m=start_margin,
-            end_margin_m=end_margin,
-        ):
-            break
-        is_blocked, _hit, _distance = blocked(
-            observer,
-            target_xyz,
-            occupied,
-            voxel,
-            step,
-            clearance,
-            min_hit_samples,
-            start_margin,
-            end_margin,
+        why, _hit = _occlusion(
+            observer, target_xyz, occupied, voxel=voxel, step=step, clearance=clearance,
+            min_hit_samples=min_hit_samples, start_margin=start_margin, end_margin=end_margin,
+            ground_z_at=ground_z_at, object_height_m=object_height_m,
+            terrain_sample_step_m=1.0, terrain_clearance_m=0.05,
         )
-        if is_blocked:
+        if why is not None:
             break
         available = min(distance_back, float(max_range_m))
         if available == max_range_m:
@@ -130,7 +142,10 @@ class SightResult:
     `distance_m` is the CONTINUOUS visible run: the distance of the last target seen before the
     first one that is not (refined by bisection when asked). `reason` says why the run ended:
 
-    - ``"range"``     -- every target up to `max_range_m` is visible; `distance_m` is the cap;
+    - ``"range"``     -- every target within `max_range_m` is visible and the path reaches the cap
+                         (a target sits on it, or the path continues beyond it); `distance_m` is the
+                         farthest in-range TARGET, so it equals the cap only when a target sits on it --
+                         the reading is quantised to the target spacing;
     - ``"end"``       -- every target supplied is visible but the path ends before the cap;
     - ``"terrain"``   -- the ground itself breaks the sight line (`terrain_blocks_los`);
     - ``"obstacle"``  -- the voxel occupancy breaks it (`blocked`); `hit_xyz` is the first hit;
@@ -184,9 +199,12 @@ def available_sight_distance_from(
     Per target, the two occlusion layers run in the HSO order -- terrain first
     (`terrain_blocks_los`), then the voxel march (`blocked`) -- and the first target that fails
     either ends the run. With `refine_tolerance_m`, the transition between the last visible target
-    and the first blocked one is bisected (ground interpolated linearly, or read from `ground_z_at`
-    when given) until the bracket is narrower than the tolerance, so the reading is no longer
-    quantised to the target spacing.
+    and the first blocked one is bisected until the bracket is narrower than the tolerance (at most
+    60 halvings), so the reading is no longer quantised to the target spacing. Midpoints are
+    interpolated linearly between the two bracketing target points, i.e. on the CALLER's surface;
+    `ground_z_at` is used only by the terrain test, never to move a target, so the refined reading
+    cannot mix two ground models. Refinement changes only `distance_m`: `reason`, `hit_xyz` and
+    `first_blocked_index` keep describing the first blocked supplied target.
 
     `targets_ground_xyz` (N,3) must be ordered by strictly increasing `distances_m` (N,).
     """
@@ -203,33 +221,14 @@ def available_sight_distance_from(
     eye = observer_ground + np.array([0.0, 0.0, float(eye_height_m)])
     lift = np.array([0.0, 0.0, float(object_height_m)])
 
-    def ground_at(xyz):
-        if ground_z_at is None:
-            return xyz
-        z = float(np.asarray(ground_z_at(np.asarray(xyz[:2], dtype=np.float64)[None]))[0])
-        return np.array([xyz[0], xyz[1], z])
-
     def test(ground_xyz):
         """Return (reason, hit) -- reason None when the target is visible."""
-        target = ground_xyz + lift
-        if ground_z_at is not None and terrain_blocks_los(
-            eye,
-            target,
-            ground_z_at,
-            sample_step_m=terrain_sample_step_m,
-            clearance_m=terrain_clearance_m,
-            object_height=float(object_height_m),
-            start_margin_m=start_margin,
-            end_margin_m=end_margin,
-        ):
-            return "terrain", None
-        if occupied:
-            is_blocked, hit, _ = blocked(
-                eye, target, occupied, voxel, step, clearance, min_hit_samples, start_margin, end_margin
-            )
-            if is_blocked:
-                return "obstacle", (None if hit is None else tuple(float(v) for v in hit))
-        return None, None
+        return _occlusion(
+            eye, ground_xyz + lift, occupied, voxel=voxel, step=step, clearance=clearance,
+            min_hit_samples=min_hit_samples, start_margin=start_margin, end_margin=end_margin,
+            ground_z_at=ground_z_at, object_height_m=float(object_height_m),
+            terrain_sample_step_m=terrain_sample_step_m, terrain_clearance_m=terrain_clearance_m,
+        )
 
     in_range = dists <= float(max_range_m) + 1e-9
     visible: list[bool | None] = [None] * len(dists)
@@ -265,15 +264,18 @@ def available_sight_distance_from(
         else:
             lo_xyz, lo_d = targets[first_blocked - 1], float(dists[first_blocked - 1])
         hi_xyz, hi_d = targets[first_blocked], float(dists[first_blocked])
-        while hi_d - lo_d > float(refine_tolerance_m):
-            frac = 0.5
-            mid_d = lo_d + frac * (hi_d - lo_d)
-            mid_xyz = ground_at(lo_xyz + frac * (hi_xyz - lo_xyz))
-            why, hit = test(mid_xyz)
+        for _ in range(60):
+            if hi_d - lo_d <= float(refine_tolerance_m):
+                break
+            mid_d = 0.5 * (lo_d + hi_d)
+            if mid_d in (lo_d, hi_d):  # float resolution reached
+                break
+            mid_xyz = 0.5 * (lo_xyz + hi_xyz)
+            why, _hit = test(mid_xyz)
             if why is None:
                 lo_xyz, lo_d = mid_xyz, mid_d
             else:
-                hi_xyz, hi_d, reason, hit_xyz = mid_xyz, mid_d, why, hit
+                hi_xyz, hi_d = mid_xyz, mid_d
         available = lo_d
         refined = True
 

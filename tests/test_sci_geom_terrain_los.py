@@ -11,7 +11,7 @@ flat = lambda xy: np.zeros(len(xy))  # noqa: E731
 
 def _v010(observer, target, ground_z_at, *, clearance_m=0.05, sample_step_m=1.0,
           object_height=0.6, start_margin_m=2.0, end_margin_m=1.0):
-    """Verbatim v0.1.0 ramp (max(0, h - clearance)), kept to document what changed."""
+    """sci-geom v0.1.0's own ramp (max(0, h - clearance)), kept to document what this release changed."""
     observer = np.asarray(observer, float)
     target = np.asarray(target, float)
     delta_xy = target[:2] - observer[:2]
@@ -57,6 +57,19 @@ def test_identical_to_v010_for_object_heights_at_or_above_clearance():
         oh = float(rng.uniform(0.05, 2.0))
         tgt = [rng.uniform(10, 150), 0.0, oh]
         assert terrain_blocks_los(obs, tgt, g, object_height=oh) == _v010(obs, tgt, g, object_height=oh)
+
+
+def test_identical_to_v010_when_clearance_exceeds_the_06_cap():
+    """clearance_m > 0.6 and object_height >= clearance_m: v0.1.0 held the clearance constant."""
+    rng = np.random.default_rng(5)
+    for _ in range(300):
+        cl = float(rng.uniform(0.6, 1.2))
+        oh = float(rng.uniform(cl, 2.5))
+        bump = lambda xy, x0=rng.uniform(20, 95), hb=rng.uniform(0, 2): hb * np.exp(  # noqa: E731
+            -((np.asarray(xy)[:, 0] - x0) / 4.0) ** 2)
+        obs, tgt = [0, 0, 1.4], [100.0, 0, oh]
+        assert terrain_blocks_los(obs, tgt, bump, clearance_m=cl, object_height=oh) == _v010(
+            obs, tgt, bump, clearance_m=cl, object_height=oh)
 
 
 def test_low_object_still_blocked_by_a_real_crest():
