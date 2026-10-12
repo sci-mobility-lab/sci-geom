@@ -252,7 +252,9 @@ def available_sight_distance_from(
 
     if first_blocked is None:
         last = int(np.flatnonzero(in_range)[-1])
-        at_cap = abs(float(dists[last]) - float(max_range_m)) <= 1e-9
+        # The run reached the range limit when the last in-range target sits on the cap OR the path
+        # continues beyond it; only a path that genuinely ends early is "end".
+        at_cap = abs(float(dists[last]) - float(max_range_m)) <= 1e-9 or bool(np.any(~in_range))
         return SightResult(min(available, float(max_range_m)), "range" if at_cap else "end", None,
                            None, tuple(visible), False)
 

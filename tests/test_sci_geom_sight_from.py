@@ -99,6 +99,14 @@ def test_end_of_path_before_range_and_no_targets():
     assert (none.distance_m, none.reason) == (0.0, "no_targets")
 
 
+def test_path_continuing_beyond_the_cap_is_range_not_end():
+    targets, d = _targets(flat, max_d=200.0)
+    res = available_sight_distance_from([0, 0, 0], targets, d, set(), eye_height_m=1.08, object_height_m=0.6,
+                                        max_range_m=152.0)
+    assert (res.distance_m, res.reason) == (150.0, "range")
+    assert res.visible[-1] is None  # beyond the cap: not evaluated, not "not visible"
+
+
 def test_k9_bicycle_stopping_case_on_flat_road_reaches_the_range_cap():
     targets, d = _targets(flat, max_d=150.0)
     for eye in (1.08, 1.37, 1.40):
