@@ -22,7 +22,9 @@ ground height under each sample, and require **two consecutive** samples where t
 clearance that ramps from `clearance_m` at the eye to the object height at the target) rises above
 the chord. Two consecutive samples, not one, so a single noisy ground cell cannot close a sightline.
 
-This is a FAITHFUL extraction, guarded by an equivalence test. Do not "improve" it without one.
+Default/elevated-target behaviour is guarded by LiDAR equivalence tests. Version 0.1.1 fixes
+the clearance ramp for targets below clearance_m (K9): its endpoint must reach the target
+height, otherwise flat road falsely blocks a ground-level target at long range.
 """
 from __future__ import annotations
 
@@ -61,6 +63,8 @@ def terrain_blocks_los(
     ground_z = np.asarray(ground_z_at(xy), dtype=np.float64)
     # Preserve the 0.6 m object SSD clearance while letting taller targets clear crests sooner.
     clearance_object_height = min(float(object_height), 0.6)
-    clearance = float(clearance_m) + u * max(0.0, clearance_object_height - float(clearance_m))
+    # Signed ramp: a ground target needs clearance tending to zero, not a 5 cm
+    # floor that crosses the descending sight line on an otherwise flat road.
+    clearance = float(clearance_m) + u * (clearance_object_height - float(clearance_m))
     over = ground_z + clearance >= line_z
     return bool(np.any(over[:-1] & over[1:])) if len(over) >= 2 else False
