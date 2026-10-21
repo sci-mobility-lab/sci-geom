@@ -49,3 +49,23 @@ def test_non_increasing_timestamps_raise_instead_of_being_silently_sorted(tmp_pa
     path.write_text("2 0 0 0 0 0 0 1\n1 1 1 1 0 0 0 1\n", encoding="utf-8")
     with pytest.raises(ValueError, match="strictly increasing"):
         load_tum(path)
+
+
+# Shared per-point re-posing: analytic cases, independent of the LiDAR adapter.
+def test_rewarp_translation_rotation_and_overlap():
+    from scipy.spatial.transform import Rotation, Slerp
+    from sci_geom.tum import rewarp_xyz
+    t = np.array([0., 2.])
+    old_p = np.array([[0., 0., 0.], [2., 0., 0.]])
+    new_p = old_p + [0., 3., 0.]
+    old_r = Slerp(t, Rotation.identity(2))
+    new_r = Slerp(t, Rotation.from_rotvec([[0., 0., np.pi / 2], [0., 0., np.pi / 2]]))
+    out = rewarp_xyz(np.array([[2., 0., 0.]]), np.array([1.]), t, old_p, old_r, t, new_p, new_r)
+    np.testing.assert_allclose(out, [[1., 4., 0.]], atol=1e-12)
+    with pytest.raises(ValueError, match="overlap"):
+        rewarp_xyz(np.ones((1, 3)), np.array([3.]), t, old_p, old_r, t, new_p, new_r)
+    with pytest.raises(ValueError, match="finite"):
+        rewarp_xyz(np.ones((1, 3)), np.array([np.nan]), t, old_p, old_r, t, new_p, new_r)
+    with pytest.raises(ValueError, match="expected"):
+        rewarp_xyz(np.ones((1, 2)), np.array([1.]), t, old_p, old_r, t, new_p, new_r)
+    assert rewarp_xyz(np.empty((0, 3)), np.array([]), t, old_p, old_r, t, new_p, new_r).shape == (0, 3)

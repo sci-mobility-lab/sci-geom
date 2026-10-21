@@ -13,6 +13,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import numpy as np
+from scipy.spatial.transform import Slerp
 
 
 def load_tum(path: str | Path) -> np.ndarray:
@@ -50,3 +51,38 @@ def load_tum(path: str | Path) -> np.ndarray:
 def load_tum_xyz(path: str | Path) -> np.ndarray:
     """Load only the translation columns, returning a float64 ``(N, 3)`` array."""
     return load_tum(path)[:, 1:4]
+
+
+def rewarp_xyz(
+    xyz: np.ndarray,
+    time: np.ndarray,
+    old_t: np.ndarray,
+    old_p: np.ndarray,
+    old_slerp: Slerp,
+    new_t: np.ndarray,
+    new_p: np.ndarray,
+    new_slerp: Slerp,
+) -> np.ndarray:
+    """Rigidly attach points to interpolated poses (linear translation, SO(3) Slerp).
+
+    This is a geometric shortcut, not a rerun of mapping or deskewing. The caller
+    supplies validated, strictly increasing trajectory knots and matching Slerp
+    objects. Query points must be finite and inside both trajectory spans.
+    Extracted from SCI_LiDAR rewarp_cloud_trajectory.py without changing its math.
+    """
+    xyz = np.asarray(xyz, dtype=np.float64)
+    query = np.asarray(time, dtype=np.float64)
+    if xyz.ndim != 2 or xyz.shape[1] != 3 or query.shape != (len(xyz),):
+        raise ValueError("expected xyz (N,3) and time (N,)")
+    if not np.isfinite(xyz).all() or not np.isfinite(query).all():
+        raise ValueError("points and times must be finite")
+    if not len(xyz):
+        return np.empty((0, 3), dtype=np.float64)
+    if query.min() < max(old_t[0], new_t[0]) or query.max() > min(old_t[-1], new_t[-1]):
+        raise ValueError("point timestamps are outside trajectory overlap")
+    old_pos = np.column_stack([np.interp(query, old_t, old_p[:, axis]) for axis in range(3)])
+    new_pos = np.column_stack([np.interp(query, new_t, new_p[:, axis]) for axis in range(3)])
+    old_r = old_slerp(query)
+    new_r = new_slerp(query)
+    local = old_r.inv().apply(np.asarray(xyz, dtype=np.float64) - old_pos)
+    return new_r.apply(local) + new_pos
