@@ -21,10 +21,10 @@ def test_clear_corridor_returns_exact_span_and_cap():
     target = np.array([60.0, 0.0, 1.4])
 
     assert available_sight_distance(
-        stations, positions, target, set(), eye_height_m=1.4
+        stations, positions, target, set()
     ) == 60.0
     assert available_sight_distance(
-        stations, positions, target, set(), eye_height_m=1.4, max_range_m=25.0
+        stations, positions, target, set(), max_range_m=25.0
     ) == 25.0
 
 
@@ -36,7 +36,6 @@ def test_wall_thirty_metres_back_stops_continuous_run():
         _positions(stations, 1.4),
         np.array([60.0, 0.0, 1.4]),
         occupied,
-        eye_height_m=1.4,
         voxel=0.1,
         clearance=0,
     )
@@ -55,11 +54,11 @@ def test_low_obstacle_produces_binding_driver_eye_height():
 
     driver = available_sight_distance(
         stations, _positions(stations, 1.08), target, obstacle,
-        eye_height_m=1.08, **kwargs,
+        **kwargs,
     )
     cyclist = available_sight_distance(
         stations, _positions(stations, 1.40), target, obstacle,
-        eye_height_m=1.40, **kwargs,
+        **kwargs,
     )
 
     # This eye-height asymmetry is the mechanism the whole contribution rests on.
@@ -76,7 +75,6 @@ def test_continuity_stops_at_first_break_instead_of_using_maximum():
         _positions(stations, 1.4),
         np.array([60.0, 10.0, 1.4]),
         occupied,
-        eye_height_m=1.4,
         voxel=0.1,
         clearance=0,
     )
@@ -129,9 +127,9 @@ def test_terrain_layer_changes_the_answer_on_a_crest():
         return 5.0 * np.exp(-((xy[:, 0] - 50.0) ** 2) / (2 * 20.0 ** 2))
 
     without = available_sight_distance(stations, positions, target, empty_occ,
-                                       eye_height_m=1.08, max_range_m=250.0)
+                                       max_range_m=250.0)
     with_terrain = available_sight_distance(stations, positions, target, empty_occ,
-                                            eye_height_m=1.08, max_range_m=250.0,
+                                            max_range_m=250.0,
                                             ground_z_at=crest, object_height_m=0.6)
 
     assert without == 100.0, "voxel-only sees a fully clear corridor -- it cannot see the ground"
@@ -172,10 +170,10 @@ def test_a_lone_speck_no_longer_closes_a_sightline():
     raw = voxelize(speck, 0.1)
 
     unfiltered = available_sight_distance(stations, positions, target, raw,
-                                          eye_height_m=1.4, voxel=0.1, clearance=0)
+                                          voxel=0.1, clearance=0)
     filtered = available_sight_distance(stations, positions, target,
                                         filter_isolated_voxels(raw, 6),
-                                        eye_height_m=1.4, voxel=0.1, clearance=0)
+                                        voxel=0.1, clearance=0)
     assert unfiltered < 60.0, "fixture must actually block without the filter"
     assert filtered == 60.0, "speckle must not close the sightline once filtered"
 

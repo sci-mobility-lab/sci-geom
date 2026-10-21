@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "sci-geom"
-version = "0.1.1"
+version = "0.2.0"
 description = "Geometry kernels shared by the SCI projects: geodesy, frames, PLY/TUM I/O, line of sight, sight distance"
 requires-python = ">=3.12"
 # scipy is a hard requirement: sight.py and degeneracy.py import scipy.spatial lazily, so a missing
