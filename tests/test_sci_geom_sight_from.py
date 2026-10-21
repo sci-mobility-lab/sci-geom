@@ -168,3 +168,24 @@ def test_bisection_stays_on_the_callers_surface():
     coarse = available_sight_distance_from([0, 0, 0.3], targets, d, occ, **kw)
     fine = available_sight_distance_from([0, 0, 0.3], targets, d, occ, refine_tolerance_m=0.1, **kw)
     assert fine.distance_m >= coarse.distance_m
+
+
+@pytest.mark.parametrize("observer, targets, distances", [
+    ([np.nan, 0, 0], [[50, 0, 0]], [50]),
+    ([0, 0, 0], [[np.inf, 0, 0]], [50]),
+    ([0, 0, 0], [[50, 0, 0]], [np.nan]),
+    ([0, 0, 0], [[50, 0, 0]], [-10]),
+    ([0, 0, 0], [[50, 0, 0]], [[50]]),
+])
+def test_invalid_geometry_cannot_report_visible(observer, targets, distances):
+    with pytest.raises(ValueError):
+        available_sight_distance_from(observer, targets, distances, set(),
+                                      eye_height_m=1.08, object_height_m=.6)
+
+
+@pytest.mark.parametrize("name", ["max_range_m", "refine_tolerance_m", "voxel", "step", "terrain_sample_step_m"])
+@pytest.mark.parametrize("bad", [0., -1., np.nan, np.inf])
+def test_invalid_parameters_refused_even_without_targets(name, bad):
+    with pytest.raises(ValueError, match=name):
+        available_sight_distance_from([0, 0, 0], [], [], set(),
+                                      eye_height_m=1.08, object_height_m=.6, **{name: bad})

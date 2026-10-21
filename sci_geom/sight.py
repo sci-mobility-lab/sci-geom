@@ -208,16 +208,33 @@ def available_sight_distance_from(
 
     `targets_ground_xyz` (N,3) must be ordered by strictly increasing `distances_m` (N,).
     """
-    observer_ground = np.asarray(observer_ground_xyz, dtype=np.float64).reshape(3)
-    targets = np.asarray(targets_ground_xyz, dtype=np.float64).reshape(-1, 3)
-    dists = np.asarray(distances_m, dtype=np.float64).reshape(-1)
+    observer_ground = np.asarray(observer_ground_xyz, dtype=np.float64)
+    targets = np.asarray(targets_ground_xyz, dtype=np.float64)
+    if targets.shape == (0,):
+        targets = targets.reshape(0, 3)
+    dists = np.asarray(distances_m, dtype=np.float64)
+    if observer_ground.shape != (3,) or targets.ndim != 2 or targets.shape[1] != 3 or dists.ndim != 1:
+        raise ValueError("expected observer (3,), targets (N,3), distances (N,)")
+    if not (np.isfinite(observer_ground).all() and np.isfinite(targets).all() and np.isfinite(dists).all()):
+        raise ValueError("observer, targets and distances must be finite")
     if len(targets) != len(dists):
         raise ValueError("targets_ground_xyz and distances_m must have the same length")
+    if np.any(dists < 0.0):
+        raise ValueError("distances_m must be nonnegative")
     if len(dists) > 1 and not np.all(np.diff(dists) > 0.0):
         raise ValueError("distances_m must be strictly increasing")
-    for name, value in (("eye_height_m", eye_height_m), ("object_height_m", object_height_m)):
+    for name, value in (("eye_height_m", eye_height_m), ("object_height_m", object_height_m),
+                        ("start_margin", start_margin), ("end_margin", end_margin),
+                        ("terrain_clearance_m", terrain_clearance_m)):
         if not math.isfinite(float(value)) or float(value) < 0.0:
             raise ValueError(f"{name} must be finite and >= 0, got {value!r}")
+    positive = [("max_range_m", max_range_m), ("voxel", voxel), ("step", step),
+                ("terrain_sample_step_m", terrain_sample_step_m)]
+    if refine_tolerance_m is not None:
+        positive.append(("refine_tolerance_m", refine_tolerance_m))
+    for name, value in positive:
+        if not math.isfinite(float(value)) or float(value) <= 0.0:
+            raise ValueError(f"{name} must be finite and > 0, got {value!r}")
     eye = observer_ground + np.array([0.0, 0.0, float(eye_height_m)])
     lift = np.array([0.0, 0.0, float(object_height_m)])
 
